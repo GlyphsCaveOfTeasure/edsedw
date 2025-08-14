@@ -1,4 +1,4 @@
---[[ WARNING: Use at your own risk! Unverified script. ]]
+--[[ WARNING: Use at your own risk! Unverified script. ]]--
 
 -- Services
 local Players = game:GetService("Players")
@@ -7,8 +7,15 @@ local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Debris = game:GetService("Debris")
-local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
 local PlaceId = game.PlaceId
+
+-- Wait for LocalPlayer
+local LocalPlayer
+repeat
+    LocalPlayer = Players.LocalPlayer
+    task.wait()
+until LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
 
 -- Settings
 local settingsFile = "brainrot_settings.json"
@@ -16,17 +23,22 @@ local settings = { Ping = true, Scripts = true }
 
 local function loadSettings()
     if isfile(settingsFile) then
-        settings = HttpService:JSONDecode(readfile(settingsFile))
+        local ok, data = pcall(readfile, settingsFile)
+        if ok then
+            settings = HttpService:JSONDecode(data)
+        end
     else
         writefile(settingsFile, HttpService:JSONEncode(settings))
     end
 end
+
 local function saveSettings()
     writefile(settingsFile, HttpService:JSONEncode(settings))
 end
+
 loadSettings()
 
--- State Variables
+-- State
 local running = true
 local foundBrainrots = {}
 local countedObjects = {}
@@ -47,13 +59,16 @@ local function matchesBrainrot(name)
 end
 
 -- GUI
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-local frame = Instance.new("Frame", ScreenGui)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
 frame.Size = UDim2.new(0, 403, 0, 415)
 frame.Position = UDim2.new(0.429, 0, 0.276, 0)
 frame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 frame.Active = true
 frame.Draggable = true
+frame.Parent = ScreenGui
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
 local Logger = Instance.new("ScrollingFrame", frame)
@@ -181,7 +196,7 @@ local function createESP(part, displayName)
     espDrawings[part] = {highlight = highlight, billboard = billboard}
 end
 
--- Ping sound
+-- Ping
 local basePing = Instance.new("Sound")
 basePing.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 basePing.Volume = 1
@@ -197,7 +212,12 @@ end
 
 -- Update GUI
 local function updateUI()
-    Logger:ClearAllChildren()
+    for _, child in pairs(Logger:GetChildren()) do
+        if child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
     local y = 0
     for name, count in pairs(foundBrainrots) do
         local label = Instance.new("TextLabel", Logger)
@@ -219,12 +239,12 @@ local function updateUI()
     FoundAmount.Text = "Found: " .. total
 end
 
--- Scan function (updated to remove despawned brainrots)
+-- Scan function
 local function scan()
     CurrentlyDoing.Text = "🔎 Scanning workspace..."
     local hasFound = false
 
-    -- Remove destroyed or gone objects
+    -- Remove destroyed objects
     for obj, _ in pairs(countedObjects) do
         if not obj or not obj.Parent then
             local name = matchesBrainrot(obj.Name)
@@ -235,7 +255,6 @@ local function scan()
                 end
             end
 
-            -- Remove ESP visuals
             if espDrawings[obj] then
                 if espDrawings[obj].highlight then espDrawings[obj].highlight:Destroy() end
                 if espDrawings[obj].billboard then espDrawings[obj].billboard:Destroy() end
@@ -246,7 +265,7 @@ local function scan()
         end
     end
 
-    -- Scan workspace for new brainrots
+    -- Scan for new brainrots
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
             local match = matchesBrainrot(obj.Name)
@@ -264,82 +283,69 @@ local function scan()
         end
     end
 
-    updateUI()
-    CurrentlyDoing.Text = hasFound and "✅ Brainrots found!" or "❌ No brainrots found."
-
-    if hasFound and settings.Scripts and not superSpeedAndFlyLoaded then
-        superSpeedAndFlyLoaded = true
-        pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/GlyphsCaveOfTeasure/speedandflyig/refs/heads/main/e"))()
-        end)
+    if hasFound then
+        CurrentlyDoing.Text = "✅ Brainrot found!"
+    else
+        CurrentlyDoing.Text = "❌ None found"
     end
 
-    foundFlag = hasFound
-    return hasFound
+    updateUI()
 end
 
 -- Server hopping
-local function tryServers()
-    local req = (syn and syn.request) or request or http_request
-    if not req then 
-        warn("No HTTP support available for fetching servers.") 
-        return 
-    end
-
-    local function fetchServers(cursor)
-        local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        if cursor then url = url .. "&cursor=" .. cursor end
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(req({Url = url, Method = "GET"}).Body)
-        end)
-        if not success then
-            warn("Failed to fetch server list.")
+local function getServers()
+    local servers = {}
+    local success, data = pcall(function()
+        if syn and syn.request then
+            return syn.request({Url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"}).Body
+        elseif request then
+            return request({Url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"}).Body
+        else
             return nil
         end
-        return result
-    end
-
-    local cursor = nil
-    repeat
-        if foundFlag or not running then return end
-        local result = fetchServers(cursor)
-        if not result then break end
-
-        for _, server in ipairs(result.data or {}) do
-            if foundFlag or not running then return end
-
-            if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
-                triedServers[server.id] = true
-                serversTried += 1
-                CurrentlyDoing.Text = "🔁 Hopping... tried " .. serversTried
-
-                -- Defer teleport safely
-                task.defer(function()
-                    local success, err = pcall(function()
-                        TeleportService:TeleportToPlaceInstance(PlaceId, server.id)
-                    end)
-                    if not success then
-                        warn("Teleport failed to server " .. server.id .. ": " .. tostring(err))
-                    else
-                        print("Teleporting to server: " .. server.id)
-                    end
-                end)
-
-                return -- exit after attempting teleport
+    end)
+    if success and data then
+        local json = HttpService:JSONDecode(data)
+        if json and json.data then
+            for _, server in ipairs(json.data) do
+                if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
+                    table.insert(servers, server.id)
+                end
             end
         end
+    end
+    return servers
+end
 
-        cursor = result.nextPageCursor
-    until not cursor
+local function hopServer()
+    CurrentlyDoing.Text = "🌐 Hopping server..."
+    local servers = getServers()
+    if #servers == 0 then
+        CurrentlyDoing.Text = "❌ No servers found, retrying..."
+        task.wait(3)
+        return hopServer()
+    end
+    local serverId = servers[math.random(1,#servers)]
+    triedServers[serverId] = true
+    TeleportService:TeleportToPlaceInstance(PlaceId, serverId, LocalPlayer)
+end
+
+-- Load super speed/fly scripts
+local function loadExtras()
+    if superSpeedAndFlyLoaded or not settings.Scripts then return end
+    superSpeedAndFlyLoaded = true
+    pcall(function()
+        local url = "https://raw.githubusercontent.com/GlyphsCaveOfTeasure/speedandfly/main/e.lua"
+        local code = game:HttpGet(url)
+        loadstring(code)()
+    end)
 end
 
 -- Main loop
 task.spawn(function()
     while running do
         scan()
-        if not foundFlag then
-            tryServers()
-        end
+        loadExtras()
         task.wait(2)
     end
 end)
