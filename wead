@@ -274,6 +274,13 @@ local function scan()
     cleanupESP()
     local hasFoundLocal = false
 
+    -- Clear previous logs
+    for _, child in ipairs(Logger:GetChildren()) do
+        if child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
     -- Scan Workspace for brainrots
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
@@ -281,15 +288,20 @@ local function scan()
             if match then
                 foundBrainrotsLocal[match] = (foundBrainrotsLocal[match] or 0) + 1
                 foundNamesLocal[match] = true
+
+                -- ESP for brainrot
                 if settings.ESP then
                     local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
                     if part then
                         createESP(part, {Name = match, IsPlayer = false})
                     end
                 end
+
+                -- Ping sound
                 if settings.Ping then
                     pcall(function() pingSound:Play() end)
                 end
+
                 hasFoundLocal = true
             end
         end
@@ -313,14 +325,24 @@ local function scan()
     foundNames = foundNamesLocal
     hasFound = hasFoundLocal
 
-    -- Update GUI
+    -- Update GUI with counts
+    for name, count in pairs(foundBrainrotsLocal) do
+        local logLabel = Instance.new("TextLabel")
+        logLabel.Size = UDim2.new(1, 0, 0, 25)
+        logLabel.BackgroundTransparency = 1
+        logLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        logLabel.Text = name .. " (" .. count .. "x)"
+        logLabel.Font = Enum.Font.GothamBold
+        logLabel.TextSize = 18
+        logLabel.Parent = Logger
+    end
+
+    -- Update scanning status
     scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
     local totalFound = 0
     for _, v in pairs(foundBrainrots) do totalFound += v end
     FoundAmount.Text = "Found: " .. totalFound
 end
-
-
 
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
