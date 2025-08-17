@@ -1,22 +1,27 @@
--- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 local PlaceId = game.PlaceId
+
+local MAX_DISTANCE = 250
+local CharacterESP = {}
+local foundBrainrots = {}
+local brainrotNames = _G.TargetBrainrots or {}
+local triedServers = {}
+local serversTried = 0
+local hasFound = false
 local settingsFile = "brainrot_settings.json"
+local running = true
 
--- Default settings
-local settings = {
-    Ping = true,
-    ESP = true
-}
+local settings = {Ping = true, ESP = true}
 
--- Load / save settings
+-- Load/save settings
 local function loadSettings()
     if isfile(settingsFile) then
         local success, result = pcall(HttpService.JSONDecode, HttpService, readfile(settingsFile))
@@ -31,16 +36,6 @@ local function saveSettings()
 end
 
 loadSettings()
-
--- Variables
-local running = true
-local foundBrainrots = {}
-local countedObjects = {}
-local espDrawings = {}
-local brainrotNames = _G.TargetBrainrots or {}
-local triedServers = {}
-local serversTried = 0
-local hasFound = false
 
 -- GUI
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
@@ -80,7 +75,6 @@ FoundAmount.TextSize = 30
 FoundAmount.BackgroundTransparency = 1
 FoundAmount.Text = "Found: 0"
 
--- Settings GUI
 local SettingsOpenButton = Instance.new("ImageButton", frame)
 SettingsOpenButton.Size = UDim2.new(0, 50, 0, 50)
 SettingsOpenButton.Position = UDim2.new(1.038, 0, 0, 0)
@@ -94,6 +88,7 @@ SettingsGUI.Position = UDim2.new(12.0, 0, 0, 0)
 SettingsGUI.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 Instance.new("UICorner", SettingsGUI).CornerRadius = UDim.new(0, 10)
 
+-- Toggle helper
 local function createToggle(parent, labelText, defaultState, yPosition, settingName)
     local Label = Instance.new("TextLabel", parent)
     Label.Size = UDim2.new(0, 98, 0, 50)
@@ -129,7 +124,6 @@ local function createToggle(parent, labelText, defaultState, yPosition, settingN
     Toggle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then toggleAction() end
     end)
-
     Knob.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then toggleAction() end
     end)
@@ -145,52 +139,99 @@ SettingsOpenButton.MouseButton1Click:Connect(function()
         {Position = settingsOpen and UDim2.new(1.03, 0, 0, 0) or UDim2.new(12.0, 0, 0, 0)}):Play()
 end)
 
--- Ping sound
 local pingSound = Instance.new("Sound")
 pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
--- ESP Functions
-local function createESP(part, color, displayName)
-    if not part or espDrawings[part] then return end
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee = part
-    highlight.FillColor = color
-    highlight.FillTransparency = 0.6
-    highlight.OutlineColor = color
-    highlight.OutlineTransparency = 0.2
-    highlight.Parent = part
-
-    local billboard = Instance.new("BillboardGui")
-    billboard.Adornee = part
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 2, 0)
-    billboard.AlwaysOnTop = true
-
-    local nameLabel = Instance.new("TextLabel", billboard)
-    nameLabel.Size = UDim2.new(1, 0, 1, 0)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Font = Enum.Font.FredokaOne
-    nameLabel.Text = displayName
-    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameLabel.TextSize = 14
-    billboard.Parent = part
-
-    espDrawings[part] = {highlight = highlight, billboard = billboard}
-end
-
+-- ESP
 local function cleanupESP()
-    for part, esp in pairs(espDrawings) do
-        pcall(function()
-            esp.highlight:Destroy()
-            esp.billboard:Destroy()
-        end)
+    for c, data in pairs(CharacterESP) do
+        if data.conn then data.conn:Disconnect() end
+        if data.highlight then data.highlight:Destroy() end
+        if data.billboard then data.billboard:Destroy() end
     end
-    espDrawings = {}
+    CharacterESP = {}
 end
 
--- Matches Brainrot Names
+local function isAlive(character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function getHead(character)
+    return character:FindFirstChild("Head")
+end
+
+local function distanceFromCamera(cf)
+    return (Camera.CFrame.Position - cf.Position).Magnitude
+end
+
+local function sameTeam(p1, p2)
+    return p1.Team and p2.Team and p1.Team == p2.Team
+end
+
+local function makeHighlight(character, color)
+    local h = Instance.new("Highlight")
+    h.Adornee = character
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.FillTransparency = 0.15
+    h.OutlineTransparency = 0.05
+    h.OutlineColor = Color3.fromRGB(255, 255, 255)
+    h.FillColor = color
+    h.Parent = character
+    return h
+end
+
+local function makeNameBillboard(head, text)
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.new(0, 200, 0, 50)
+    bb.AlwaysOnTop = true
+    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+    bb.MaxDistance = MAX_DISTANCE + 25
+    bb.Adornee = head
+    bb.Parent = head
+
+    local tl = Instance.new("TextLabel")
+    tl.Size = UDim2.fromScale(1, 1)
+    tl.BackgroundTransparency = 1
+    tl.Text = text
+    tl.TextSize = 18
+    tl.Font = Enum.Font.GothamBold
+    tl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tl.TextStrokeTransparency = 0
+    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    tl.Parent = bb
+
+    return bb
+end
+
+local function createESP(part, color, name)
+    if not part or not part.Parent then return end
+    if CharacterESP[part.Parent] then return end
+    local highlight = makeHighlight(part.Parent, color)
+    local billboard
+    if part:IsA("BasePart") then
+        billboard = makeNameBillboard(part, name)
+    end
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if not part.Parent or (part.Parent:FindFirstChildOfClass("Humanoid") and not isAlive(part.Parent)) then
+            highlight.Enabled = false
+            if billboard then billboard.Enabled = false end
+            return
+        end
+        local d = distanceFromCamera(part.CFrame)
+        local within = d <= MAX_DISTANCE
+        highlight.Enabled = within
+        if billboard then billboard.Enabled = within end
+    end)
+
+    CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
+end
+
+-- Brainrot detection
 local function matchesBrainrot(name)
     for _, br in ipairs(brainrotNames) do
         if name == br then return br end
@@ -198,13 +239,11 @@ local function matchesBrainrot(name)
     return nil
 end
 
--- Scan Workspace
 local function scan()
     foundBrainrots = {}
     cleanupESP()
     local hasFoundLocal = false
 
-    -- Brainrots
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
             local match = matchesBrainrot(obj.Name)
@@ -219,7 +258,7 @@ local function scan()
         end
     end
 
-    -- Players
+    -- Player ESP
     if settings.ESP then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -229,7 +268,9 @@ local function scan()
     end
 
     scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
-    FoundAmount.Text = "Found: " .. (#foundBrainrots > 0 and #foundBrainrots or 0)
+    local totalFound = 0
+    for _, v in pairs(foundBrainrots) do totalFound += v end
+    FoundAmount.Text = "Found: " .. totalFound
     hasFound = hasFoundLocal
 end
 
@@ -265,6 +306,7 @@ local function tryServers()
                         if not ok then warn("Failed to teleport to: " .. server.id .. " | " .. err) end
                     end)()
                     task.wait(0.3)
+                    return
                 end
             end
             cursor = result.nextPageCursor
