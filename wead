@@ -191,7 +191,6 @@ local function makeHighlight(character, color)
     return h
 end
 
--- Make a Name Billboard
 local function makeNameBillboard(head, text)
     local bb = Instance.new("BillboardGui")
     bb.Size = UDim2.new(0, 200, 0, 50)
@@ -205,15 +204,17 @@ local function makeNameBillboard(head, text)
     tl.Size = UDim2.fromScale(1, 1)
     tl.BackgroundTransparency = 1
     tl.Text = text
-    tl.TextSize = 18
+    tl.TextSize = 22
     tl.Font = Enum.Font.GothamBold
-    tl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tl.TextColor3 = Color3.fromRGB(255, 50, 50) -- red for brainrots
     tl.TextStrokeTransparency = 0
-    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    tl.TextStrokeColor3 = Color3.new(0, 0, 0) -- black outline
+    tl.TextScaled = true
     tl.Parent = bb
 
     return bb
 end
+
 
 -- Enhanced ESP creation for both players and brainrots
 local function createESP(part, owner)
@@ -349,42 +350,42 @@ local function tryServers()
     if not req then warn("No HTTP support.") return end
 
     local function fetchServers(cursor)
-        local url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"
-        if cursor then url = url.."&cursor="..cursor end
+        local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        if cursor then url = url .. "&cursor=" .. cursor end
+
         local success, result = pcall(function()
-            return HttpService:JSONDecode(req({Url=url, Method="GET"}).Body)
+            return HttpService:JSONDecode(req({Url = url, Method = "GET"}).Body)
         end)
         return success and result or nil
     end
 
     local function hopLoop()
-        local cursors = {nil}
+        local cursor = nil
         repeat
-            local nextCursors = {}
-            for _, cursor in ipairs(cursors) do
-                local result = fetchServers(cursor)
-                if result then
-                    for _, server in ipairs(result.data or {}) do
-                        if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
-                            triedServers[server.id] = true
-                            serversTried += 1
-                            scanningLabel.Text = "🔁 Hopping... ("..serversTried..")"
-                            coroutine.wrap(function()
-                                local ok, err = pcall(function()
-                                    TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
-                                end)
-                                if not ok then warn("Failed to teleport to: "..server.id.." | "..err) end
-                            end)()
-                            task.wait(0.15) -- faster hop attempts
-                            return
-                        end
-                    end
-                    if result.nextPageCursor then table.insert(nextCursors, result.nextPageCursor) end
+            local result = fetchServers(cursor)
+            if not result then break end
+
+            for _, server in ipairs(result.data or {}) do
+                if not running then return end
+                if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
+                    triedServers[server.id] = true
+                    serversTried += 1
+                    scanningLabel.Text = "🔁 Hopping... (" .. serversTried .. ")"
+
+                    coroutine.wrap(function()
+                        pcall(function()
+                            TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                        end)
+                    end)()
+
+                    task.wait(0.3)
+                    return -- hop to first valid server found
                 end
             end
-            cursors = nextCursors
-        until #cursors == 0
+            cursor = result.nextPageCursor
+        until not cursor
     end
+
     hopLoop()
 end
 
@@ -393,9 +394,17 @@ task.spawn(function()
     while true do
         if running then
             scan()
-            if not hasFound then
+
+            local total = 0
+            for _, c in pairs(foundBrainrots) do total += c end
+
+            if total == 0 then
+                hasFound = false
                 scanningLabel.Text = "🔎 Scanned: No brainrots found, hopping servers..."
                 tryServers()
+            else
+                hasFound = true
+                scanningLabel.Text = "✅ Found!"
             end
         end
         task.wait(3)
