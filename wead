@@ -144,7 +144,7 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
--- ESP
+-- ESP cleanup
 local function cleanupESP()
     for c, data in pairs(CharacterESP) do
         if data.conn then data.conn:Disconnect() end
@@ -206,13 +206,17 @@ local function makeNameBillboard(head, text)
     return bb
 end
 
-local function createESP(part, color, name)
+-- Enhanced ESP creation
+local function createESP(part, owner)
     if not part or not part.Parent then return end
     if CharacterESP[part.Parent] then return end
+
+    local color = sameTeam(LocalPlayer, owner) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
     local highlight = makeHighlight(part.Parent, color)
     local billboard
-    if part:IsA("BasePart") then
-        billboard = makeNameBillboard(part, name)
+    local head = getHead(part.Parent)
+    if head then
+        billboard = makeNameBillboard(head, owner.Name)
     end
 
     local conn
@@ -226,15 +230,19 @@ local function createESP(part, color, name)
         local within = d <= MAX_DISTANCE
         highlight.Enabled = within
         if billboard then billboard.Enabled = within end
+        highlight.FillColor = sameTeam(LocalPlayer, owner) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
     end)
 
     CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
 end
 
+
 -- Brainrot detection
 local function matchesBrainrot(name)
     for _, br in ipairs(brainrotNames) do
-        if name == br then return br end
+        if name:lower() == br:lower() then
+            return br
+        end
     end
     return nil
 end
@@ -242,6 +250,7 @@ end
 local function scan()
     foundBrainrots = {}
     cleanupESP()
+    foundNames = {}
     local hasFoundLocal = false
 
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -249,6 +258,7 @@ local function scan()
             local match = matchesBrainrot(obj.Name)
             if match then
                 foundBrainrots[match] = (foundBrainrots[match] or 0) + 1
+                table.insert(foundNames, match)
                 if settings.ESP then
                     createESP(obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart"), Color3.fromRGB(255, 0, 0), match)
                 end
@@ -258,11 +268,11 @@ local function scan()
         end
     end
 
-    -- Player ESP
     if settings.ESP then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                 createESP(player.Character.HumanoidRootPart, Color3.fromRGB(0, 0, 255), player.Name)
+                table.insert(foundNames, player.Name)
             end
         end
     end
@@ -274,43 +284,46 @@ local function scan()
     hasFound = hasFoundLocal
 end
 
--- Server Hopper
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
     if not req then warn("No HTTP support.") return end
 
     local function fetchServers(cursor)
-        local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        if cursor then url = url .. "&cursor=" .. cursor end
+        local url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"
+        if cursor then url = url.."&cursor="..cursor end
         local success, result = pcall(function()
-            return HttpService:JSONDecode(req({Url = url, Method = "GET"}).Body)
+            return HttpService:JSONDecode(req({Url=url, Method="GET"}).Body)
         end)
-        return (success and result) or nil
+        return success and result or nil
     end
 
     local function hopLoop()
-        local cursor = nil
+        local cursors = {nil}
         repeat
-            local result = fetchServers(cursor)
-            if not result then break end
-            for _, server in ipairs(result.data or {}) do
-                if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
-                    triedServers[server.id] = true
-                    serversTried += 1
-                    scanningLabel.Text = "🔁 Hopping... (" .. serversTried .. ")"
-
-                    coroutine.wrap(function()
-                        local ok, err = pcall(function()
-                            TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
-                        end)
-                        if not ok then warn("Failed to teleport to: " .. server.id .. " | " .. err) end
-                    end)()
-                    task.wait(0.3)
-                    return
+            local nextCursors = {}
+            for _, cursor in ipairs(cursors) do
+                local result = fetchServers(cursor)
+                if result then
+                    for _, server in ipairs(result.data or {}) do
+                        if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
+                            triedServers[server.id] = true
+                            serversTried += 1
+                            scanningLabel.Text = "🔁 Hopping... ("..serversTried..")"
+                            coroutine.wrap(function()
+                                local ok, err = pcall(function()
+                                    TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                                end)
+                                if not ok then warn("Failed to teleport to: "..server.id.." | "..err) end
+                            end)()
+                            task.wait(0.15) -- faster hop attempts
+                            return
+                        end
+                    end
+                    if result.nextPageCursor then table.insert(nextCursors, result.nextPageCursor) end
                 end
             end
-            cursor = result.nextPageCursor
-        until not cursor
+            cursors = nextCursors
+        until #cursors == 0
     end
     hopLoop()
 end
