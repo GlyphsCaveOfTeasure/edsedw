@@ -347,12 +347,11 @@ end
 
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
-    if not req then warn("No HTTP support.") return end
+    if not req then return end
 
     local function fetchServers(cursor)
         local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         if cursor then url = url .. "&cursor=" .. cursor end
-
         local success, result = pcall(function()
             return HttpService:JSONDecode(req({Url = url, Method = "GET"}).Body)
         end)
@@ -365,6 +364,7 @@ local function tryServers()
             local result = fetchServers(cursor)
             if not result then break end
 
+            local serversChecked = 0
             for _, server in ipairs(result.data or {}) do
                 if not running then return end
                 if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
@@ -378,8 +378,11 @@ local function tryServers()
                         end)
                     end)()
 
-                    task.wait(0.3)
-                    return -- hop to first valid server found
+                    serversChecked += 1
+                    if serversChecked >= 5 then
+                        task.wait(1)
+                        serversChecked = 0
+                    end
                 end
             end
             cursor = result.nextPageCursor
@@ -389,24 +392,22 @@ local function tryServers()
     hopLoop()
 end
 
--- Main Loop
 task.spawn(function()
     while true do
         if running then
             scan()
-
             local total = 0
             for _, c in pairs(foundBrainrots) do total += c end
 
             if total == 0 then
                 hasFound = false
-                scanningLabel.Text = "🔎 Scanned: No brainrots found, hopping servers..."
+                scanningLabel.Text = "🔎 No brainrots found, hopping..."
                 tryServers()
             else
                 hasFound = true
                 scanningLabel.Text = "✅ Found!"
             end
         end
-        task.wait(3)
+        task.wait(1)
     end
 end)
