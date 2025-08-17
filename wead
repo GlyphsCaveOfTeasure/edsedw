@@ -379,19 +379,21 @@ local function tryServers()
                     end)()
 
                     serversChecked += 1
-                    if serversChecked >= 5 then
-                        task.wait(1)
+                    if serversChecked >= 3 then
+                        task.wait(0.5) -- ✅ short delay after each 3 tries
                         serversChecked = 0
                     end
                 end
             end
+
             cursor = result.nextPageCursor
-        until not cursor
+        until not cursor -- ✅ keeps scanning until there are no more servers (up to 100 per page)
     end
 
     hopLoop()
 end
 
+-- Main loop
 task.spawn(function()
     while true do
         if running then
@@ -408,6 +410,6 @@ task.spawn(function()
                 scanningLabel.Text = "✅ Found!"
             end
         end
-        task.wait(1)
+        task.wait(1) -- controls how often scanning happens
     end
 end)
