@@ -1,20 +1,22 @@
+-- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 local settingsFile = "brainrot_settings.json"
 
+-- Default settings
 local settings = {
     Ping = true,
     ESP = true
 }
 
+-- Load / save settings
 local function loadSettings()
     if isfile(settingsFile) then
         local success, result = pcall(HttpService.JSONDecode, HttpService, readfile(settingsFile))
@@ -30,19 +32,15 @@ end
 
 loadSettings()
 
+-- Variables
 local running = true
 local foundBrainrots = {}
 local countedObjects = {}
 local espDrawings = {}
-
 local brainrotNames = _G.TargetBrainrots or {}
-
-local function matchesBrainrot(name)
-    for _, br in ipairs(brainrotNames) do
-        if name == br then return br end
-    end
-    return nil
-end
+local triedServers = {}
+local serversTried = 0
+local hasFound = false
 
 -- GUI
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
@@ -82,7 +80,7 @@ FoundAmount.TextSize = 30
 FoundAmount.BackgroundTransparency = 1
 FoundAmount.Text = "Found: 0"
 
--- Settings
+-- Settings GUI
 local SettingsOpenButton = Instance.new("ImageButton", frame)
 SettingsOpenButton.Size = UDim2.new(0, 50, 0, 50)
 SettingsOpenButton.Position = UDim2.new(1.038, 0, 0, 0)
@@ -151,7 +149,7 @@ end)
 local pingSound = Instance.new("Sound")
 pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
-pingSound.Parent = workspace
+pingSound.Parent = Workspace
 
 -- ESP Functions
 local function createESP(part, color, displayName)
@@ -192,66 +190,99 @@ local function cleanupESP()
     espDrawings = {}
 end
 
--- UI Update
-local function updateUI()
-    Logger:ClearAllChildren()
-    local y = 0
-    for name, count in pairs(foundBrainrots) do
-        local label = Instance.new("TextLabel", Logger)
-        label.Size = UDim2.new(1, -10, 0, 30)
-        label.Position = UDim2.new(0, 0, 0, y)
-        label.Font = Enum.Font.FredokaOne
-        label.Text = name .. " x" .. count
-        label.TextColor3 = Color3.fromRGB(255, 255, 255)
-        label.TextSize = 14
-        label.BackgroundTransparency = 1
-        y += 35
+-- Matches Brainrot Names
+local function matchesBrainrot(name)
+    for _, br in ipairs(brainrotNames) do
+        if name == br then return br end
     end
-    FoundAmount.Text = "Found: " .. tostring((function()
-        local total = 0
-        for _, c in pairs(foundBrainrots) do total += c end
-        return total
-    end)())
+    return nil
 end
 
--- Scan function
+-- Scan Workspace
 local function scan()
     foundBrainrots = {}
-    countedObjects = {}
     cleanupESP()
-    local hasFound = false
+    local hasFoundLocal = false
 
     -- Brainrots
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("Folder") then
-            if not obj:IsDescendantOf(LocalPlayer.Character) then
-                local match = matchesBrainrot(obj.Name)
-                if match and not countedObjects[obj] then
-                    countedObjects[obj] = true
-                    foundBrainrots[match] = (foundBrainrots[match] or 0) + 1
-                    if settings.ESP then createESP(obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart"), Color3.fromRGB(255, 0, 0), match) end
-                    if settings.Ping then pingSound:Play() end
-                    hasFound = true
+        if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
+            local match = matchesBrainrot(obj.Name)
+            if match then
+                foundBrainrots[match] = (foundBrainrots[match] or 0) + 1
+                if settings.ESP then
+                    createESP(obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart"), Color3.fromRGB(255, 0, 0), match)
                 end
+                if settings.Ping then pingSound:Play() end
+                hasFoundLocal = true
             end
         end
     end
 
     -- Players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            if settings.ESP then createESP(player.Character.HumanoidRootPart, Color3.fromRGB(0, 0, 255), player.Name) end
+    if settings.ESP then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                createESP(player.Character.HumanoidRootPart, Color3.fromRGB(0, 0, 255), player.Name)
+            end
         end
     end
 
-    updateUI()
-    scanningLabel.Text = hasFound and "Brainrots detected!" or "Scanning..."
+    scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
+    FoundAmount.Text = "Found: " .. (#foundBrainrots > 0 and #foundBrainrots or 0)
+    hasFound = hasFoundLocal
 end
 
--- Run loop
-spawn(function()
-    while running do
-        scan()
-        task.wait(1)
+-- Server Hopper
+local function tryServers()
+    local req = (syn and syn.request) or request or http_request
+    if not req then warn("No HTTP support.") return end
+
+    local function fetchServers(cursor)
+        local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        if cursor then url = url .. "&cursor=" .. cursor end
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(req({Url = url, Method = "GET"}).Body)
+        end)
+        return (success and result) or nil
+    end
+
+    local function hopLoop()
+        local cursor = nil
+        repeat
+            local result = fetchServers(cursor)
+            if not result then break end
+            for _, server in ipairs(result.data or {}) do
+                if server.id ~= game.JobId and server.playing < server.maxPlayers and not triedServers[server.id] then
+                    triedServers[server.id] = true
+                    serversTried += 1
+                    scanningLabel.Text = "🔁 Hopping... (" .. serversTried .. ")"
+
+                    coroutine.wrap(function()
+                        local ok, err = pcall(function()
+                            TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                        end)
+                        if not ok then warn("Failed to teleport to: " .. server.id .. " | " .. err) end
+                    end)()
+                    task.wait(0.3)
+                end
+            end
+            cursor = result.nextPageCursor
+        until not cursor
+    end
+    hopLoop()
+end
+
+-- Main Loop
+task.spawn(function()
+    while true do
+        if running then
+            scan()
+            if not hasFound then
+                scanningLabel.Text = "🔎 Scanned: No brainrots found, hopping servers..."
+                tryServers()
+            end
+        end
+        task.wait(3)
     end
 end)
