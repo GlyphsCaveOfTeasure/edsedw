@@ -38,7 +38,10 @@ end
 loadSettings()
 
 -- GUI
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
 local frame = Instance.new("Frame", ScreenGui)
 frame.Size = UDim2.new(0, 403, 0, 415)
 frame.Position = UDim2.new(0.429, 0, 0.276, 0)
@@ -144,7 +147,7 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
--- ESP cleanup
+-- Cleans up all existing ESP
 local function cleanupESP()
     for c, data in pairs(CharacterESP) do
         if data.conn then data.conn:Disconnect() end
@@ -154,23 +157,28 @@ local function cleanupESP()
     CharacterESP = {}
 end
 
+-- Check if character is alive
 local function isAlive(character)
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     return humanoid and humanoid.Health > 0
 end
 
+-- Get the head of a character
 local function getHead(character)
     return character:FindFirstChild("Head")
 end
 
+-- Distance from camera
 local function distanceFromCamera(cf)
     return (Camera.CFrame.Position - cf.Position).Magnitude
 end
 
+-- Check if two players are on the same team
 local function sameTeam(p1, p2)
     return p1.Team and p2.Team and p1.Team == p2.Team
 end
 
+-- Make a Highlight
 local function makeHighlight(character, color)
     local h = Instance.new("Highlight")
     h.Adornee = character
@@ -183,6 +191,7 @@ local function makeHighlight(character, color)
     return h
 end
 
+-- Make a Name Billboard
 local function makeNameBillboard(head, text)
     local bb = Instance.new("BillboardGui")
     bb.Size = UDim2.new(0, 200, 0, 50)
@@ -206,15 +215,22 @@ local function makeNameBillboard(head, text)
     return bb
 end
 
--- Enhanced ESP creation
+-- Enhanced ESP creation for both players and brainrots
 local function createESP(part, owner)
     if not part or not part.Parent then return end
     if CharacterESP[part.Parent] then return end
 
-    local color = sameTeam(LocalPlayer, owner) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
+    -- Determine color
+    local color
+    if owner.IsPlayer then
+        color = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
+    else
+        color = Color3.fromRGB(255, 0, 0)
+    end
+
     local highlight = makeHighlight(part.Parent, color)
-    local billboard
     local head = getHead(part.Parent)
+    local billboard
     if head then
         billboard = makeNameBillboard(head, owner.Name)
     end
@@ -230,12 +246,16 @@ local function createESP(part, owner)
         local within = d <= MAX_DISTANCE
         highlight.Enabled = within
         if billboard then billboard.Enabled = within end
-        highlight.FillColor = sameTeam(LocalPlayer, owner) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
+
+        if owner.IsPlayer then
+            highlight.FillColor = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
+        else
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        end
     end)
 
     CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
 end
-
 
 -- Brainrot detection
 local function matchesBrainrot(name)
@@ -247,42 +267,60 @@ local function matchesBrainrot(name)
     return nil
 end
 
+-- Scan function
 local function scan()
-    foundBrainrots = {}
+    local foundBrainrotsLocal = {}
+    local foundNamesLocal = {}
     cleanupESP()
-    foundNames = {}
     local hasFoundLocal = false
 
+    -- Scan Workspace for brainrots
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
             local match = matchesBrainrot(obj.Name)
             if match then
-                foundBrainrots[match] = (foundBrainrots[match] or 0) + 1
-                table.insert(foundNames, match)
+                foundBrainrotsLocal[match] = (foundBrainrotsLocal[match] or 0) + 1
+                foundNamesLocal[match] = true
                 if settings.ESP then
-                    createESP(obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart"), Color3.fromRGB(255, 0, 0), match)
+                    local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        createESP(part, {Name = match, IsPlayer = false})
+                    end
                 end
-                if settings.Ping then pingSound:Play() end
+                if settings.Ping then
+                    pcall(function() pingSound:Play() end)
+                end
                 hasFoundLocal = true
             end
         end
     end
 
+    -- Player ESP
     if settings.ESP then
         for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                createESP(player.Character.HumanoidRootPart, Color3.fromRGB(0, 0, 255), player.Name)
-                table.insert(foundNames, player.Name)
+            if player ~= LocalPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    createESP(hrp, {Name = player.Name, IsPlayer = true, Player = player})
+                    foundNamesLocal[player.Name] = true
+                end
             end
         end
     end
 
+    -- Update global variables
+    foundBrainrots = foundBrainrotsLocal
+    foundNames = foundNamesLocal
+    hasFound = hasFoundLocal
+
+    -- Update GUI
     scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
     local totalFound = 0
     for _, v in pairs(foundBrainrots) do totalFound += v end
     FoundAmount.Text = "Found: " .. totalFound
-    hasFound = hasFoundLocal
 end
+
+
 
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
