@@ -21,7 +21,6 @@ local running = true
 
 local settings = {Ping = true, ESP = true}
 
--- Load/save settings
 local function loadSettings()
     if isfile(settingsFile) then
         local success, result = pcall(HttpService.JSONDecode, HttpService, readfile(settingsFile))
@@ -37,7 +36,7 @@ end
 
 loadSettings()
 
--- GUI
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
@@ -91,7 +90,7 @@ SettingsGUI.Position = UDim2.new(12.0, 0, 0, 0)
 SettingsGUI.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 Instance.new("UICorner", SettingsGUI).CornerRadius = UDim.new(0, 10)
 
--- Toggle helper
+
 local function createToggle(parent, labelText, defaultState, yPosition, settingName)
     local Label = Instance.new("TextLabel", parent)
     Label.Size = UDim2.new(0, 98, 0, 50)
@@ -147,7 +146,7 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
--- Cleans up all existing ESP
+
 local function cleanupESP()
     for c, data in pairs(CharacterESP) do
         if data.conn then data.conn:Disconnect() end
@@ -157,28 +156,27 @@ local function cleanupESP()
     CharacterESP = {}
 end
 
--- Check if character is alive
+
 local function isAlive(character)
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     return humanoid and humanoid.Health > 0
 end
 
--- Get the head of a character
 local function getHead(character)
     return character:FindFirstChild("Head")
 end
 
--- Distance from camera
+
 local function distanceFromCamera(cf)
     return (Camera.CFrame.Position - cf.Position).Magnitude
 end
 
--- Check if two players are on the same team
+
 local function sameTeam(p1, p2)
     return p1.Team and p2.Team and p1.Team == p2.Team
 end
 
--- Make a Highlight
+
 local function makeHighlight(character, color)
     local h = Instance.new("Highlight")
     h.Adornee = character
@@ -204,11 +202,11 @@ local function makeNameBillboard(head, text)
     tl.Size = UDim2.fromScale(1, 1)
     tl.BackgroundTransparency = 1
     tl.Text = text
-    tl.TextSize = 22
+    tl.TextSize = 15
     tl.Font = Enum.Font.GothamBold
-    tl.TextColor3 = Color3.fromRGB(255, 50, 50) -- red for brainrots
+    tl.TextColor3 = Color3.fromRGB(255, 50, 50)
     tl.TextStrokeTransparency = 0
-    tl.TextStrokeColor3 = Color3.new(0, 0, 0) -- black outline
+    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
     tl.TextScaled = true
     tl.Parent = bb
 
@@ -216,12 +214,11 @@ local function makeNameBillboard(head, text)
 end
 
 
--- Enhanced ESP creation for both players and brainrots
+
 local function createESP(part, owner)
     if not part or not part.Parent then return end
     if CharacterESP[part.Parent] then return end
 
-    -- Determine color
     local color
     if owner.IsPlayer then
         color = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
@@ -258,7 +255,6 @@ local function createESP(part, owner)
     CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
 end
 
--- Brainrot detection
 local function matchesBrainrot(name)
     for _, br in ipairs(brainrotNames) do
         if name:lower() == br:lower() then
@@ -268,21 +264,21 @@ local function matchesBrainrot(name)
     return nil
 end
 
--- Scan function
+
 local function scan()
     local foundBrainrotsLocal = {}
     local foundNamesLocal = {}
     cleanupESP()
     local hasFoundLocal = false
 
-    -- Clear previous logs
+
     for _, child in ipairs(Logger:GetChildren()) do
         if child:IsA("TextLabel") then
             child:Destroy()
         end
     end
 
-    -- Scan Workspace for brainrots
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
             local match = matchesBrainrot(obj.Name)
@@ -290,7 +286,7 @@ local function scan()
                 foundBrainrotsLocal[match] = (foundBrainrotsLocal[match] or 0) + 1
                 foundNamesLocal[match] = true
 
-                -- ESP for brainrot
+
                 if settings.ESP then
                     local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
                     if part then
@@ -298,7 +294,6 @@ local function scan()
                     end
                 end
 
-                -- Ping sound
                 if settings.Ping then
                     pcall(function() pingSound:Play() end)
                 end
@@ -308,7 +303,6 @@ local function scan()
         end
     end
 
-    -- Player ESP
     if settings.ESP then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
@@ -321,12 +315,10 @@ local function scan()
         end
     end
 
-    -- Update global variables
     foundBrainrots = foundBrainrotsLocal
     foundNames = foundNamesLocal
     hasFound = hasFoundLocal
 
-    -- Update GUI with counts
     for name, count in pairs(foundBrainrotsLocal) do
         local logLabel = Instance.new("TextLabel")
         logLabel.Size = UDim2.new(1, 0, 0, 25)
@@ -338,7 +330,6 @@ local function scan()
         logLabel.Parent = Logger
     end
 
-    -- Update scanning status
     scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
     local totalFound = 0
     for _, v in pairs(foundBrainrots) do totalFound += v end
@@ -380,20 +371,20 @@ local function tryServers()
 
                     serversChecked += 1
                     if serversChecked >= 3 then
-                        task.wait(0.5) -- ✅ short delay after each 3 tries
+                        task.wait(0.5)
                         serversChecked = 0
                     end
                 end
             end
 
             cursor = result.nextPageCursor
-        until not cursor -- ✅ keeps scanning until there are no more servers (up to 100 per page)
+        until not cursor
     end
 
     hopLoop()
 end
 
--- Main loop
+
 task.spawn(function()
     while true do
         if running then
@@ -410,6 +401,6 @@ task.spawn(function()
                 scanningLabel.Text = "✅ Found!"
             end
         end
-        task.wait(1) -- controls how often scanning happens
+        task.wait(1) 
     end
 end)
