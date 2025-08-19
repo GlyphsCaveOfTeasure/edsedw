@@ -146,69 +146,6 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
-
-local function cleanupESP()
-    for c, data in pairs(CharacterESP) do
-        if data.conn then data.conn:Disconnect() end
-        if data.highlight and data.highlight.Parent then data.highlight:Destroy() end
-        if data.billboard and data.billboard.Parent then data.billboard:Destroy() end
-    end
-    CharacterESP = {}
-end
-
-local function isAlive(character)
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    return humanoid and humanoid.Health > 0
-end
-
-local function getHead(character)
-    return character:FindFirstChild("Head")
-end
-
-local function distanceFromCamera(cf)
-    return (Camera.CFrame.Position - cf.Position).Magnitude
-end
-
-local function sameTeam(p1, p2)
-    return p1.Team and p2.Team and p1.Team == p2.Team
-end
-
-local function makeHighlight(character, color)
-    local h = Instance.new("Highlight")
-    h.Adornee = character
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    h.FillTransparency = 0.15
-    h.OutlineTransparency = 0.05
-    h.OutlineColor = Color3.fromRGB(255, 255, 255)
-    h.FillColor = color
-    h.Parent = game:GetService("CoreGui") -- parent in CoreGui to prevent deletion
-    return h
-end
-
-local function makeNameBillboard(head, text)
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 200, 0, 50)
-    bb.AlwaysOnTop = true
-    bb.StudsOffset = Vector3.new(0, 2.5, 0)
-    bb.MaxDistance = (MAX_DISTANCE or 500) + 25
-    bb.Adornee = head
-    bb.Parent = game:GetService("CoreGui") -- safer than parenting to head
-
-    local tl = Instance.new("TextLabel")
-    tl.Size = UDim2.fromScale(1, 1)
-    tl.BackgroundTransparency = 1
-    tl.Text = text
-    tl.TextSize = 15
-    tl.Font = Enum.Font.GothamBold
-    tl.TextColor3 = Color3.fromRGB(255, 50, 50)
-    tl.TextStrokeTransparency = 0
-    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
-    tl.TextScaled = true
-    tl.Parent = bb
-
-    return bb
-end
-
 local function createESP(part, owner)
     if not part or not part.Parent then return end
     if CharacterESP[part.Parent] then return end
@@ -225,13 +162,18 @@ local function createESP(part, owner)
     local billboard
     if head then
         billboard = makeNameBillboard(head, owner.Name)
+        if owner.IsPlayer then
+            billboard.Parent = owner.Player:WaitForChild("PlayerGui")
+        end
     end
 
     local conn
     conn = RunService.RenderStepped:Connect(function()
         if not part.Parent or (part.Parent:FindFirstChildOfClass("Humanoid") and not isAlive(part.Parent)) then
-            highlight.Enabled = false
-            if billboard then billboard.Enabled = false end
+            highlight:Destroy()
+            if billboard then billboard:Destroy() end
+            if conn then conn:Disconnect() end
+            CharacterESP[part.Parent] = nil
             return
         end
 
