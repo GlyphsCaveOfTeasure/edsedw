@@ -150,12 +150,11 @@ pingSound.Parent = Workspace
 local function cleanupESP()
     for c, data in pairs(CharacterESP) do
         if data.conn then data.conn:Disconnect() end
-        if data.highlight then data.highlight:Destroy() end
-        if data.billboard then data.billboard:Destroy() end
+        if data.highlight and data.highlight.Parent then data.highlight:Destroy() end
+        if data.billboard and data.billboard.Parent then data.billboard:Destroy() end
     end
     CharacterESP = {}
 end
-
 
 local function isAlive(character)
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -166,16 +165,13 @@ local function getHead(character)
     return character:FindFirstChild("Head")
 end
 
-
 local function distanceFromCamera(cf)
     return (Camera.CFrame.Position - cf.Position).Magnitude
 end
 
-
 local function sameTeam(p1, p2)
     return p1.Team and p2.Team and p1.Team == p2.Team
 end
-
 
 local function makeHighlight(character, color)
     local h = Instance.new("Highlight")
@@ -185,7 +181,7 @@ local function makeHighlight(character, color)
     h.OutlineTransparency = 0.05
     h.OutlineColor = Color3.fromRGB(255, 255, 255)
     h.FillColor = color
-    h.Parent = character
+    h.Parent = game:GetService("CoreGui") -- parent in CoreGui to prevent deletion
     return h
 end
 
@@ -194,9 +190,9 @@ local function makeNameBillboard(head, text)
     bb.Size = UDim2.new(0, 200, 0, 50)
     bb.AlwaysOnTop = true
     bb.StudsOffset = Vector3.new(0, 2.5, 0)
-    bb.MaxDistance = MAX_DISTANCE + 25
+    bb.MaxDistance = (MAX_DISTANCE or 500) + 25
     bb.Adornee = head
-    bb.Parent = head
+    bb.Parent = game:GetService("CoreGui") -- safer than parenting to head
 
     local tl = Instance.new("TextLabel")
     tl.Size = UDim2.fromScale(1, 1)
@@ -212,8 +208,6 @@ local function makeNameBillboard(head, text)
 
     return bb
 end
-
-
 
 local function createESP(part, owner)
     if not part or not part.Parent then return end
@@ -240,8 +234,9 @@ local function createESP(part, owner)
             if billboard then billboard.Enabled = false end
             return
         end
+
         local d = distanceFromCamera(part.CFrame)
-        local within = d <= MAX_DISTANCE
+        local within = d <= (MAX_DISTANCE or 500)
         highlight.Enabled = within
         if billboard then billboard.Enabled = within end
 
@@ -254,6 +249,7 @@ local function createESP(part, owner)
 
     CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
 end
+
 
 local function matchesBrainrot(name)
     for _, br in ipairs(brainrotNames) do
