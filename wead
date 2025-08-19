@@ -146,52 +146,90 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
-local function createESP(part, owner)
+local function cleanupESP()
+    for c, data in pairs(CharacterESP) do
+        if data.conn then data.conn:Disconnect() end
+        if data.highlight then data.highlight:Destroy() end
+        if data.billboard then data.billboard:Destroy() end
+    end
+    CharacterESP = {}
+end
+
+local function isAlive(character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+local function getHead(character)
+    return character:FindFirstChild("Head")
+end
+
+local function distanceFromCamera(cf)
+    return (Workspace.CurrentCamera.CFrame.Position - cf.Position).Magnitude
+end
+
+local function makeHighlight(character, color)
+    local h = Instance.new("Highlight")
+    h.Adornee = character
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.FillTransparency = 0.15
+    h.OutlineTransparency = 0.05
+    h.OutlineColor = Color3.fromRGB(255, 255, 255)
+    h.FillColor = color
+    h.Parent = character
+    return h
+end
+
+local function makeNameBillboard(head, text)
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.new(0, 200, 0, 50)
+    bb.AlwaysOnTop = true
+    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+    bb.MaxDistance = MAX_DISTANCE + 25
+    bb.Adornee = head
+    bb.Parent = head
+
+    local tl = Instance.new("TextLabel")
+    tl.Size = UDim2.fromScale(1, 1)
+    tl.BackgroundTransparency = 1
+    tl.Text = text
+    tl.TextSize = 15
+    tl.Font = Enum.Font.GothamBold
+    tl.TextColor3 = Color3.fromRGB(255, 50, 50)
+    tl.TextStrokeTransparency = 0
+    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    tl.TextScaled = true
+    tl.Parent = bb
+
+    return bb
+end
+
+local function createESP(part, name)
     if not part or not part.Parent then return end
     if CharacterESP[part.Parent] then return end
 
-    local color
-    if owner.IsPlayer then
-        color = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
-    else
-        color = Color3.fromRGB(255, 0, 0)
-    end
-
-    local highlight = makeHighlight(part.Parent, color)
+    local highlight = makeHighlight(part.Parent, Color3.fromRGB(255, 0, 0))
     local head = getHead(part.Parent)
     local billboard
     if head then
-        billboard = makeNameBillboard(head, owner.Name)
-        if owner.IsPlayer then
-            billboard.Parent = owner.Player:WaitForChild("PlayerGui")
-        end
+        billboard = makeNameBillboard(head, name)
     end
 
     local conn
     conn = RunService.RenderStepped:Connect(function()
         if not part.Parent or (part.Parent:FindFirstChildOfClass("Humanoid") and not isAlive(part.Parent)) then
-            highlight:Destroy()
-            if billboard then billboard:Destroy() end
-            if conn then conn:Disconnect() end
-            CharacterESP[part.Parent] = nil
+            highlight.Enabled = false
+            if billboard then billboard.Enabled = false end
             return
         end
-
         local d = distanceFromCamera(part.CFrame)
-        local within = d <= (MAX_DISTANCE or 500)
+        local within = d <= MAX_DISTANCE
         highlight.Enabled = within
         if billboard then billboard.Enabled = within end
-
-        if owner.IsPlayer then
-            highlight.FillColor = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
-        else
-            highlight.FillColor = Color3.fromRGB(255, 0, 0)
-        end
     end)
 
     CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
 end
-
 
 local function matchesBrainrot(name)
     for _, br in ipairs(brainrotNames) do
@@ -202,13 +240,9 @@ local function matchesBrainrot(name)
     return nil
 end
 
-
 local function scan()
     local foundBrainrotsLocal = {}
-    local foundNamesLocal = {}
     cleanupESP()
-    local hasFoundLocal = false
-
 
     for _, child in ipairs(Logger:GetChildren()) do
         if child:IsA("TextLabel") then
@@ -216,46 +250,25 @@ local function scan()
         end
     end
 
-
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("Folder")) and not obj:IsDescendantOf(LocalPlayer.Character) then
+        if (obj:IsA("Model") or obj:IsA("Folder")) then
             local match = matchesBrainrot(obj.Name)
             if match then
                 foundBrainrotsLocal[match] = (foundBrainrotsLocal[match] or 0) + 1
-                foundNamesLocal[match] = true
-
-
                 if settings.ESP then
                     local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
                     if part then
-                        createESP(part, {Name = match, IsPlayer = false})
+                        createESP(part, match)
                     end
                 end
-
                 if settings.Ping then
                     pcall(function() pingSound:Play() end)
-                end
-
-                hasFoundLocal = true
-            end
-        end
-    end
-
-    if settings.ESP then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    createESP(hrp, {Name = player.Name, IsPlayer = true, Player = player})
-                    foundNamesLocal[player.Name] = true
                 end
             end
         end
     end
 
     foundBrainrots = foundBrainrotsLocal
-    foundNames = foundNamesLocal
-    hasFound = hasFoundLocal
 
     for name, count in pairs(foundBrainrotsLocal) do
         local logLabel = Instance.new("TextLabel")
@@ -268,12 +281,13 @@ local function scan()
         logLabel.Parent = Logger
     end
 
-    scanningLabel.Text = hasFoundLocal and "✅ Found!" or "🔎 Scanning..."
+    scanningLabel.Text = next(foundBrainrotsLocal) and "✅ Found!" or "🔎 Scanning..."
     local totalFound = 0
     for _, v in pairs(foundBrainrots) do totalFound += v end
     FoundAmount.Text = "Found: " .. totalFound
 end
 
+-- Server hopping function (removed LocalPlayer reference)
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
     if not req then return end
@@ -303,7 +317,7 @@ local function tryServers()
 
                     coroutine.wrap(function()
                         pcall(function()
-                            TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                            TeleportService:TeleportToPlaceInstance(PlaceId, server.id)
                         end)
                     end)()
 
@@ -322,7 +336,7 @@ local function tryServers()
     hopLoop()
 end
 
-
+-- Main loop
 task.spawn(function()
     while true do
         if running then
