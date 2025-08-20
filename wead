@@ -144,14 +144,14 @@ pingSound.SoundId = (_G.PingSoundId or "rbxassetid://17208361335")
 pingSound.Volume = 1
 pingSound.Parent = Workspace
 
-task.spawn(function()
-    while true do
-        if settings.Ping then
-            pcall(function() pingSound:Play() end)
-        end
-        task.wait(1)
+local pinged = false
+local function pingOnce()
+    if settings.Ping and not pinged then
+        pcall(function() pingSound:Play() end)
+        pinged = true
     end
-end)
+end
+
 
 
 local function cleanupESP()
@@ -270,6 +270,7 @@ local function matchesBrainrot(name, obj)
     return nil
 end
 
+local pinged = false
 local function scan()
     local foundBrainrotsLocal = {}
     local foundNamesLocal = {}
@@ -296,8 +297,9 @@ local function scan()
                     end
                 end
 
-                if settings.Ping then
+                if settings.Ping and not pinged then
                     pcall(function() pingSound:Play() end)
+                    pinged = true
                 end
 
                 hasFoundLocal = true
@@ -336,6 +338,10 @@ local function scan()
     local totalFound = 0
     for _, v in pairs(foundBrainrots) do totalFound += v end
     FoundAmount.Text = "Found: " .. totalFound
+
+    if not hasFoundLocal then
+        pinged = false
+    end
 end
 
 local function tryServers()
